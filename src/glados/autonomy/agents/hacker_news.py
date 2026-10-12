@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from ...core.llm_decision import LLMConfig, LLMDecisionError, RelevanceDecision, llm_decide_sync
+from ..mind_runtime import MindRuntime
 from ..subagent import Subagent, SubagentConfig, SubagentOutput
 
 
@@ -34,7 +35,7 @@ class HackerNewsSubagent(Subagent):
         self._min_score = min_score
         self._llm_config = llm_config
 
-    def tick(self) -> SubagentOutput | None:
+    def run(self, runtime: MindRuntime) -> SubagentOutput | None:
         """Fetch top stories, store new ones, report unshown."""
         stories = self._fetch_top_stories()
         if not stories:
@@ -57,6 +58,12 @@ class HackerNewsSubagent(Subagent):
             if not isinstance(story, dict):
                 continue
 
+            if story.get("_reported") or story.get("_relevant") is False:
+                continue
+            if story.get("_relevant") is True:
+                unshown.append(story)
+                continue
+
             if self._llm_config:
                 try:
                     decision = llm_decide_sync(
@@ -72,10 +79,12 @@ class HackerNewsSubagent(Subagent):
                             "Set importance 0.0-1.0. Be concise in your summary."
                         ),
                     )
+                    story = {**story, "_relevant": decision.relevant}
                     if decision.relevant:
                         story["_importance"] = decision.importance
                         story["_summary"] = decision.summary
                         unshown.append(story)
+                    self.memory.set(entry.key, story)
                 except LLMDecisionError as e:
                     logger.warning("HN: LLM decision failed, using fallback: %s", e)
                     if story.get("score", 0) >= self._min_score:
@@ -97,6 +106,9 @@ class HackerNewsSubagent(Subagent):
         # Report top unshown stories (sorted by importance if available)
         unshown.sort(key=lambda s: s.get("_importance", 0.5), reverse=True)
         to_report = unshown[: self._top_n]
+        # Published to the slot, not necessarily spoken: Autonomy owns delivery.
+        for story in to_report:
+            self.memory.set(f"hn_{story['id']}", {**story, "_reported": True})
         titles = [s["title"] for s in to_report]
         summary = f"HN: {', '.join(titles)}"
 

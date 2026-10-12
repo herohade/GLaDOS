@@ -16,10 +16,12 @@ dependencies = [
     "soundfile>=0.13.0",
     "regex>=2024.5.15",
     "pydantic>=2.10.6",
+    "jsonschema>=4.26.0",
     "httpx>=0.28.1",
     "rich>=14.0.0",
     "threadpoolctl>=3.0.0",
-    "mcp>=1.25.0",
+    "mcp>=1.25.0,<2.0.0",
+    "websockets>=16.0",
 ]
 
 [project.optional-dependencies]

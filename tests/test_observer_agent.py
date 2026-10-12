@@ -1,15 +1,13 @@
 """Tests for ObserverAgent."""
 
-import threading
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from glados.autonomy.agents.observer_agent import ObserverAgent, OBSERVER_SYSTEM_PROMPT
-from glados.autonomy.constitution import ConstitutionalState, PromptModifier
+from glados.autonomy.agents.observer_agent import OBSERVER_SYSTEM_PROMPT, ObserverAgent
+from glados.autonomy.constitution import ConstitutionalState
 from glados.autonomy.llm_client import LLMConfig
+from glados.autonomy.slots import TaskSlotStore
 from glados.autonomy.subagent import SubagentConfig
+from glados.core.conversation_store import ConversationStore
 
 
 def make_config() -> SubagentConfig:
@@ -18,7 +16,7 @@ def make_config() -> SubagentConfig:
         agent_id="test_observer",
         title="Test Observer",
         role="meta_supervision",
-        loop_interval_s=60.0,
+
     )
 
 
@@ -36,11 +34,11 @@ class TestObserverAgentInit:
     def test_basic_init(self):
         """Test basic initialization."""
         config = make_config()
-        agent = ObserverAgent(config)
+        agent = ObserverAgent(config, slot_store=TaskSlotStore())
 
         assert agent.config == config
         assert agent._llm_config is None
-        assert agent._conversation_history == []
+        assert agent._conversation_store is None
         assert isinstance(agent._constitutional_state, ConstitutionalState)
         assert agent._sample_count == 10
         assert agent._min_samples == 5
@@ -49,7 +47,7 @@ class TestObserverAgentInit:
         """Test initialization with LLM config."""
         config = make_config()
         llm_config = make_llm_config()
-        agent = ObserverAgent(config, llm_config=llm_config)
+        agent = ObserverAgent(config, slot_store=TaskSlotStore(), llm_config=llm_config)
 
         assert agent._llm_config == llm_config
 
@@ -57,18 +55,17 @@ class TestObserverAgentInit:
         """Test initialization with shared conversation history."""
         config = make_config()
         history = [{"role": "user", "content": "Hello"}]
-        lock = threading.Lock()
+        store = ConversationStore(history)
         state = ConstitutionalState()
 
         agent = ObserverAgent(
             config,
-            conversation_history=history,
-            conversation_lock=lock,
+            slot_store=TaskSlotStore(),
+            conversation_store=store,
             constitutional_state=state,
         )
 
-        assert agent._conversation_history is history
-        assert agent._conversation_lock is lock
+        assert agent._conversation_store is store
         assert agent._constitutional_state is state
 
     def test_init_custom_sample_settings(self):
@@ -76,6 +73,7 @@ class TestObserverAgentInit:
         config = make_config()
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             sample_count=20,
             min_samples_for_analysis=10,
         )
@@ -90,9 +88,9 @@ class TestObserverAgentTick:
     def test_tick_no_llm_config(self):
         """Test tick returns idle when no LLM configured."""
         config = make_config()
-        agent = ObserverAgent(config)
+        agent = ObserverAgent(config, slot_store=TaskSlotStore())
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "idle"
@@ -109,12 +107,13 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "monitoring"
@@ -129,15 +128,16 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
         # First tick analyzes
         agent._last_analysis_count = 5
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "monitoring"
@@ -154,12 +154,13 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "stable"
@@ -184,13 +185,14 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             constitutional_state=state,
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "adjusted"
@@ -220,13 +222,14 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             constitutional_state=state,
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "rejected"
@@ -246,12 +249,13 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "error"
@@ -268,12 +272,13 @@ class TestObserverAgentTick:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "error"
@@ -299,16 +304,18 @@ class TestObserverAgentAnalyze:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
-            min_samples_for_analysis=5,
+            conversation_store=ConversationStore(history),
+            min_samples_for_analysis=6,
         )
 
-        # Should return monitoring because only 5 assistant messages
-        result = agent.tick()
+        # User and system messages do not count toward the six required samples.
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "monitoring"
+        assert "5/6" in result.summary
 
     def test_analyze_ignores_empty_content(self):
         """Test that empty assistant messages are ignored."""
@@ -324,13 +331,14 @@ class TestObserverAgentAnalyze:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
         # Only 3 valid messages
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "monitoring"
@@ -349,12 +357,13 @@ class TestObserverAgentAnalyze:
 
         agent = ObserverAgent(
             config,
+            slot_store=TaskSlotStore(),
             llm_config=llm_config,
-            conversation_history=history,
+            conversation_store=ConversationStore(history),
             min_samples_for_analysis=5,
         )
 
-        result = agent.tick()
+        result = agent.run(agent.runtime)
 
         assert result is not None
         assert result.status == "monitoring"
@@ -369,14 +378,14 @@ class TestObserverAgentConstitutionalState:
         config = make_config()
         state = ConstitutionalState()
 
-        agent = ObserverAgent(config, constitutional_state=state)
+        agent = ObserverAgent(config, slot_store=TaskSlotStore(), constitutional_state=state)
 
         assert agent.constitutional_state is state
 
     def test_constitutional_state_default(self):
         """Test default constitutional state is created."""
         config = make_config()
-        agent = ObserverAgent(config)
+        agent = ObserverAgent(config, slot_store=TaskSlotStore())
 
         assert agent.constitutional_state is not None
         assert isinstance(agent.constitutional_state, ConstitutionalState)

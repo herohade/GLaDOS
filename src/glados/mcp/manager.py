@@ -3,6 +3,7 @@ import fnmatch
 import subprocess
 import threading
 import time
+import traceback
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -12,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from .config import MCPServerConfig
+from .search_results import SEARCH_TOOL, compact_search_results
 from ..observability import ObservabilityBus, trim_message
 
 try:
@@ -41,6 +43,36 @@ async def _http_transport(url: str, headers: dict[str, str]) -> AsyncIterator[An
     async with create_mcp_http_client(headers=headers) as client:
         async with streamable_http_client(url, http_client=client) as streams:
             yield streams
+
+
+def _leaf_exceptions(exc: BaseException, depth: int = 0, max_depth: int = 8) -> list[str]:
+    """Recursively descend ExceptionGroup chains to surface leaf exceptions.
+
+    anyio task groups wrap failures in one or more ``ExceptionGroup`` layers, so
+    logging the top-level exception only shows "unhandled errors in a TaskGroup".
+    This flattens that tree down to the underlying causes.
+
+    Args:
+        exc: The exception to unwrap. Anything exposing an ``exceptions``
+            attribute (e.g. ``ExceptionGroup``) is treated as a group and
+            descended; anything else is a leaf.
+        depth: Current recursion depth (internal).
+        max_depth: Safety bound on recursion; beyond it descent stops and the
+            offending node is reported with an "(unwrap depth exceeded)" prefix.
+
+    Returns:
+        A flat list of ``"<ExceptionType>: <message>"`` strings, one per leaf
+        exception (or one entry if ``exc`` is not a group).
+    """
+    if depth > max_depth:
+        return [f"(unwrap depth exceeded) {type(exc).__name__}: {exc}"]
+    subs = getattr(exc, "exceptions", None)
+    if subs:
+        out: list[str] = []
+        for sub in subs:
+            out.extend(_leaf_exceptions(sub, depth + 1, max_depth))
+        return out
+    return [f"{type(exc).__name__}: {exc}"]
 
 
 class MCPError(RuntimeError):
@@ -116,6 +148,25 @@ class MCPManager:
             entries = list(self._tool_registry.items())
         entries.sort(key=lambda item: item[0])
         return [self._tool_entry_to_definition(tool_name, entry) for tool_name, entry in entries]
+
+    def get_routing_catalog(self) -> list[dict[str, Any]]:
+        """Describe currently registered, allowed tools without fetching resources."""
+        with self._tool_lock:
+            entries = list(self._tool_registry.items())
+        servers: dict[str, dict[str, Any]] = {}
+        for name, entry in sorted(entries):
+            config = self._servers.get(entry.server)
+            category = config.routing_category if config else "mcp"
+            if entry.server.casefold() == "memory":
+                category = "memory"
+            server = servers.setdefault(entry.server, {
+                "name": entry.server,
+                "description": config.description if config else "",
+                "category": category,
+                "tools": [],
+            })
+            server["tools"].append({"name": name, "description": entry.description or ""})
+        return [servers[name] for name in sorted(servers)]
 
     def get_context_messages(self, timeout: float = 5.0, block: bool = True) -> list[dict[str, str]]:
         if not self._servers:
@@ -227,7 +278,10 @@ class MCPManager:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning(f"MCP: server '{config.name}' connection failed: {exc}")
+                leaves = _leaf_exceptions(exc)
+                logger.warning(f"MCP: server '{config.name}' connection failed: leaves={leaves}")
+                tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                logger.warning(f"MCP: full traceback for '{config.name}':\n{tb}")
                 if self._observability_bus:
                     self._observability_bus.emit(
                         source="mcp",
@@ -344,6 +398,8 @@ class MCPManager:
         content = self._render_contents(self._get_field(result, "content") or [])
         if error_flag:
             raise MCPToolError(content or "MCP tool reported an error.")
+        if self._build_tool_name(server_name, tool_name) == SEARCH_TOOL:
+            content = compact_search_results(content)
         return content or "success"
 
     async def _read_resource(self, session: ClientSession, server_name: str, uri: str) -> dict[str, str] | None:

@@ -1,391 +1,56 @@
-<a href="https://trendshift.io/repositories/9828" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9828" alt="dnhkng%2FGlaDOS | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-
 # GLaDOS Personality Core
 
-## Prologue
+> *"Science isn't about asking why. It's about asking, 'Why not?'"* — Cave Johnson
 
-> *"Science isn't about asking why. It's about asking, 'Why not?'"  -  Cave Johnson*
+A voice assistant with GLaDOS’s custom voice, dry humour, camera observations,
+persistent memory and tools. Talk through a local microphone or the browser,
+watch the animated core respond, and inspect what each mind is doing.
 
-GLaDOS is the AI antagonist from Valve's Portal series—a sardonic, passive-aggressive superintelligence who views humans as test subjects worthy of both study and mockery.
+The project began with a simple question: could we build the personality core
+from Portal? The current system combines a conversational model with independent
+cores for emotion, memory, vision, system health and research. Their observations
+feed a shared context, while an Autonomy Core decides when an update deserves a
+spoken response.
 
-Back in 2022 when ChatGPT made its debut, I had a realization: we are living in the Sci-Fi future and can actually build her now. A demented, obsessive AI fixated on humanity, super intelligent yet utterly lacking sound judgment; so just like an LLM, right? 2026, and still no moon colonies or flying cars. But a passive-aggressive AI that controls your lights and runs experiments on you? That we can do.
-
-The architecture borrows from Minsky's Society of Mind—rather than one monolithic prompt, multiple specialized agents (vision, memory, personality, planning) each contribute to a dynamic context. GLaDOS's "self" emerges from their combined output, assembled fresh for each interaction.
-
-The hard part was latency. Getting round-trip response time under 600 milliseconds is a threshold—below it, conversation stops feeling stilted and starts to flow. That meant training a custom TTS model and ruthlessly cutting milliseconds from every part of the pipeline.
-
-Since 2023 I've refactored the system multiple times as better models came out. The current version finally adds what I always wanted: vision, memory, and tool use via MCP.
-
-She sees through a camera, hears through a microphone, speaks through a speaker, and judges you accordingly.
-
-[Join our Discord!](https://discord.com/invite/ERTDKwpjNB) | [Sponsor the project](https://ko-fi.com/dnhkng)
+[Discord](https://discord.com/invite/ERTDKwpjNB) ·
+[Sponsor](https://ko-fi.com/dnhkng) ·
+[Web console guide](docs/webapp.md) ·
+[Architecture](#how-the-cores-work)
 
 https://github.com/user-attachments/assets/c22049e4-7fba-4e84-8667-2c6657a656a0
 
-## Vision
-
-
-> *"We've both said a lot of things that you're going to regret"  -  GLaDOS*
-
-Most voice assistants wait for wake words. GLaDOS doesn't wait—she observes, thinks, and speaks when she has something to say. All the while, parts of her minds are tracking what she sees, monitoring system stats, and researching new neurotoxin recipes online.
-
-**Goals:**
-- **Proactive behavior**: React to events (vision, sound, time) without being prompted
-- **Emotional state**: PAD model (Pleasure-Arousal-Dominance) for reactive mood
-- **Persistent personality**: HEXACO traits provide stable character across sessions
-- **Multi-agent architecture**: Subagents handle research, memory, emotions; main agent stays focused
-- **Real-time conversation**: Optimized latency, natural interruption handling
-
-## What's New
-
-- **Emotions**: PAD model for reactive mood + HEXACO traits for persistent personality
-- **Long-term Memory**: Facts, preferences, and conversation summaries persist across sessions
-- **Observer Agent**: Constitutional AI monitors behavior and self-adjusts within bounds
-- **Vision**: FastVLM gives her eyes. [Details](/docs/vision.md) | [Demo](https://www.youtube.com/watch?v=JDd9Rc4toEo)
-- **Autonomy**: She watches, waits, and speaks when she has something to say. [Details](/docs/autonomy.md)
-- **MCP Tools**: Extensible tool system for home automation, system info, etc. [Details](/docs/mcp.md)
-- **8GB SBC**: Runs on a Rock5b with RK3588 NPU. [Branch](https://github.com/dnhkng/RKLLM-Gradio)
-
-## Roadmap
-
-> *"Federal regulations require me to warn you that this next test chamber... is looking pretty good.”  -  GLaDOS*
-
-There's still a lot do do; I will be swapping out models are they are released, and then working on anamatronics, once a good model with inverse kinematics comes out. There was a time when I would code that myself; these days it makes more sense to wait until a trained model is released!
-
-- [x] Train GLaDOS voice
-- [x] Personality that actually sounds like her
-- [x] Vision via VLM
-- [x] Autonomy (proactive behavior)
-- [x] MCP tool system
-- [x] Emotional state (PAD + HEXACO model)
-- [x] Long-term memory
-- [ ] Implement streaming ASR (nvidia/multitalker-parakeet-streaming-0.6b-v1)
-- [ ] Observer agent (behavior adjustment)
-- [ ] 3D-printable enclosure
-- [ ] Animatronics
-
-## Architecture
-
-> *"Let's be honest. Neither one of us knows what that thing does. Just put it in the corner and I'll deal with it later."  -  GLaDOS*
-
-```mermaid
-flowchart TB
-    subgraph Input
-        mic[🎤 Microphone] --> vad[VAD] --> asr[ASR]
-        text[⌨️ Text Input]
-        tick[⏱️ Timer]
-        cam[📷 Camera]--> vlm[VLM]
-    end
-
-    subgraph Minds["Subagents"]
-        sensors[Sensors]
-        weather[Weather]
-        emotion[Emotion]
-        news[News]
-        memory[Memory]
-    end
-
-    ctx[📋 Context]
-
-    subgraph Core["Main Agent"]
-        llm[🧠 LLM]
-        tts[TTS]
-    end
-
-    subgraph Output
-        speaker[🔊 Speaker]
-        logs[Logs]
-        images[🖼️ Images]
-        motors[⚙️ Animatronics]
-    end
-
-    asr -->|priority| llm
-    text -->|priority| llm
-    vlm --> ctx
-    tick -->|autonomy| llm
-
-    Minds -->|write| ctx
-    ctx -->|read| llm
-    llm --> tts --> speaker
-    llm --> logs
-    llm <-->|MCP| tools[Tools]
-    tools --> images
-    tools --> motors
-```
-
-GLaDOS runs a loop: each tick she reads her slots (weather, news, vision, mood), decides if she has something to say, and speaks. No wake word—if she has an opinion, you'll hear it.
-
-**Two lanes**: Your speech jumps the queue (priority lane). The autonomy lane is just the loop running in the background. User always wins.
-
-<details>
-<summary><strong>Audio Pipeline</strong></summary>
-
-```mermaid
-flowchart LR
-    subgraph Capture["Audio Capture"]
-        mic[Microphone<br/>16kHz]
-        vad[Silero VAD<br/>32ms chunks]
-        buffer[Pre-activation<br/>Buffer 800ms]
-    end
-
-    subgraph Recognition["Speech Recognition"]
-        detect[Voice Detected<br/>VAD > 0.8]
-        accumulate[Accumulate<br/>Speech]
-        silence[Silence Detection<br/>640ms pause]
-        asr[Parakeet ASR]
-    end
-
-    subgraph Interruption["Interruption Handling"]
-        speaking{Speaking?}
-        stop[Stop Playback]
-        clip[Clip Response]
-    end
-
-    mic --> vad --> buffer
-    buffer --> detect --> accumulate
-    accumulate --> silence --> asr
-    detect --> speaking
-    speaking -->|Yes| stop --> clip
-```
-
-- **Microphone** captures at 16kHz mono
-- **Silero VAD** processes 32ms chunks, triggers at probability > 0.8
-- **Pre-activation buffer** preserves 800ms before voice detected
-- **Silence detection** waits 640ms pause before finalizing
-- **Interruption** stops playback and clips the response in conversation history
-
-</details>
-
-<details>
-<summary><strong>Thread Architecture</strong></summary>
-
-| Thread | Class | Daemon | Priority | Queue | Purpose |
-|--------|-------|--------|----------|-------|---------|
-| SpeechListener | `SpeechListener` | ✓ | INPUT | — | VAD + ASR |
-| TextListener | `TextListener` | ✓ | INPUT | — | Text input |
-| LLMProcessor | `LanguageModelProcessor` | ✗ | PROCESSING | `llm_queue_priority` | Main LLM |
-| LLMProcessor-Auto-N | `LanguageModelProcessor` | ✗ | PROCESSING | `llm_queue_autonomy` | Autonomy LLM |
-| ToolExecutor | `ToolExecutor` | ✗ | PROCESSING | `tool_calls_queue` | Tool execution |
-| TTSSynthesizer | `TextToSpeechSynthesizer` | ✗ | OUTPUT | `tts_queue` | Voice synthesis |
-| AudioPlayer | `SpeechPlayer` | ✗ | OUTPUT | `audio_queue` | Playback |
-| AutonomyLoop | `AutonomyLoop` | ✓ | BACKGROUND | — | Tick orchestration |
-| VisionProcessor | `VisionProcessor` | ✓ | BACKGROUND | `vision_request_queue` | Vision analysis |
-
-**Daemon threads** can be killed on exit. **Non-daemon threads** must complete gracefully to preserve state (e.g., conversation history).
-
-**Shutdown order**: INPUT → PROCESSING → OUTPUT → BACKGROUND → CLEANUP
-
-</details>
-
-<details>
-<summary><strong>Context Building</strong></summary>
-
-```mermaid
-flowchart TB
-    subgraph Sources["Context Sources"]
-        sys[System Prompt<br/>Personality]
-        slots[Task Slots<br/>Weather, News, etc.]
-        prefs[User Preferences]
-        const[Constitutional<br/>Modifiers]
-        mcp[MCP Resources]
-        vision[Vision State]
-    end
-
-    subgraph Builder["Context Builder"]
-        merge[Priority-Sorted<br/>Merge]
-    end
-
-    subgraph Final["LLM Request"]
-        messages[System Messages]
-        history[Conversation<br/>History]
-        user[User Message]
-    end
-
-    Sources --> merge --> messages
-    messages --> history --> user
-```
-
-What the LLM sees on each request:
-1. **System prompt** with personality
-2. **Task slots** (weather, news, vision state, emotion)
-3. **User preferences** from memory
-4. **Constitutional modifiers** (behavior adjustments from observer)
-5. **MCP resources** (dynamic tool descriptions)
-6. **Conversation history** (compacted when exceeding token threshold)
-
-</details>
-
-<details>
-<summary><strong>Autonomy System</strong></summary>
-
-```mermaid
-flowchart TB
-    subgraph Triggers
-        tick[⏱️ Time Tick]
-        vision[📷 Vision Event]
-        task[📋 Task Update]
-    end
-
-    subgraph Loop["Autonomy Loop"]
-        bus[Event Bus]
-        cooldown{Cooldown<br/>Passed?}
-        build[Build Context<br/>from Slots]
-        dispatch[Dispatch to<br/>LLM Queue]
-    end
-
-    subgraph Agents["Subagents"]
-        emotion[Emotion Agent<br/>PAD Model]
-        compact[Compaction Agent<br/>Token Management]
-        observer[Observer Agent<br/>Behavior Adjustment]
-        weather[Weather Agent]
-        news[HN Agent]
-    end
-
-    Triggers --> bus --> cooldown
-    cooldown -->|Yes| build --> dispatch
-    Agents -->|write| slots[Task Slots]
-    slots -->|read| build
-```
-
-Each subagent runs its own loop: timer or camera triggers it, it makes an LLM decision, and writes to a slot the main agent reads. Fully async—subagents never block the main conversation.
-
-See [autonomy.md](/docs/autonomy.md) for details.
-
-</details>
-
-<details>
-<summary><strong>Tool Execution</strong></summary>
-
-```mermaid
-sequenceDiagram
-    participant LLM
-    participant Executor as Tool Executor
-    participant MCP as MCP Server
-    participant Native as Native Tool
-
-    LLM->>Executor: tool_call {name, args}
-
-    alt MCP Tool (mcp.*)
-        Executor->>MCP: call_tool(server, tool, args)
-        MCP-->>Executor: result
-    else Native Tool
-        Executor->>Native: run(tool_call_id, args)
-        Native-->>Executor: result
-    end
-
-    Executor->>LLM: {role: tool, content: result}
-```
-
-**Native tools**: `speak`, `do_nothing`, `get_user_preferences`, `set_user_preferences`
-
-**MCP tools**: Prefixed with server name (e.g., `mcp.system_info.get_cpu`). Supports stdio, HTTP, and SSE transports.
-
-See [mcp.md](/docs/mcp.md) for configuration.
-
-</details>
-
-### Components
-
-> *"All these science spheres are made out of asbestos, by the way. Keeps out the rats. Let us know if you feel a shortness of breath, a persistent dry cough, or your heart stopping. Because that's not part of the test. That's asbestos."  -  Cave Johnson*
-
-| Component | Technology | Purpose | Status |
-|-----------|------------|---------|--------|
-| **Speech Recognition** | Parakeet TDT (ONNX) | Speech-to-text, 16kHz streaming | ✅ |
-| **Voice Activity** | Silero VAD (ONNX) | Detect speech, 32ms chunks | ✅ |
-| **Voice Synthesis** | Kokoro / GLaDOS TTS | Text-to-speech, streaming | ✅ |
-| **Interruption** | VAD + Playback Control | Talk over her, she stops | ✅ |
-| **Vision** | FastVLM (ONNX) | Scene understanding, change detection | ✅ |
-| **LLM** | OpenAI-compatible API | Reasoning, tool use, streaming | ✅ |
-| **Tools** | MCP Protocol | Extensibility, stdio/HTTP/SSE | ✅ |
-| **Autonomy** | Subagent Architecture | Proactive behavior, tick loop | ✅ |
-| **Conversation** | ConversationStore | Thread-safe history | ✅ |
-| **Compaction** | LLM Summarization | Token management | ✅ |
-| **Emotional State** | PAD + HEXACO | Reactive mood, persistent personality | ✅ |
-| **Long-term Memory** | MCP + Subagent | Facts, preferences, summaries | ✅ |
-| **Observer Agent** | Constitutional AI | Behavior adjustment | ✅ |
-
-✅ = Done | 🔨 = In progress
-
-## Quick Start
-
-> *"The Enrichment Center is required to remind you that the Weighted Companion Cube cannot talk. In the event that it does talk The Enrichment Centre asks you to ignore its advice."  -  GLaDOS*
-
-1. Install [Ollama](https://github.com/ollama/ollama) and grab a model:
-   ```bash
-   ollama pull llama3.2
-   ```
-
-2. Clone and install:
-   ```bash
-   git clone https://github.com/dnhkng/GLaDOS.git
-   cd GLaDOS
-   python scripts/install.py
-   ```
-
-3. Run:
-   ```bash
-   uv run glados          # Voice mode
-   uv run glados tui      # Text interface
-   ```
-
-## Installation
-
-### GPU Setup (recommended)
-
-- **NVIDIA**: Install [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit)
-- **AMD/Intel**: Install appropriate [ONNX Runtime](https://onnxruntime.ai/docs/install/)
-
-Works without GPU, just slower.
-
-### LLM Backend
-
-GLaDOS needs an LLM. Options:
-1. [Ollama](https://github.com/ollama/ollama) (easiest): `ollama pull llama3.2`
-2. Any OpenAI-compatible API (OpenAI, [MiniMax](https://platform.minimaxi.com/), OpenRouter, etc.)
-
-Configure in `glados_config.yaml`:
-```yaml
-completion_url: "http://localhost:11434/v1/chat/completions"
-model: "llama3.2"
-api_key: ""  # if needed
-```
-
-#### Cloud LLM Providers
-
-You can use any OpenAI-compatible cloud API. Example configs are provided in `configs/`:
-
-**MiniMax** — high-performance models with 512K context and built-in reasoning:
-```yaml
-llm_model: "MiniMax-M3"
-completion_url: "https://api.minimax.io/v1/chat/completions"
-api_key: "your-minimax-api-key"
-```
-See `configs/minimax_config.yaml` for a complete configuration. Models: `MiniMax-M3` (latest flagship, default), `MiniMax-M2.7` (previous generation), `MiniMax-M2.7-highspeed` (low-latency).
-
-**OpenRouter** — access multiple models through one API:
-```yaml
-llm_model: "openai/gpt-4o"
-completion_url: "https://openrouter.ai/api/v1/chat/completions"
-api_key: "your-openrouter-api-key"
-llm_headers:
-  HTTP-Referer: "https://github.com/dnhkng/GLaDOS"
-  X-Title: "GLaDOS"
-```
-
-### Platform Notes
-
-**Linux:**
-```bash
-sudo apt install libportaudio2
-```
-
-**Windows:**
-Install Python 3.12 from Microsoft Store.
-
-**macOS:**
-Experimental. Check Discord for help.
-
-### Install
+## What it does
+
+> *"We've both said a lot of things that you're going to regret"* — GLaDOS
+
+- **Voice conversation:** Gemma 4 E4B can receive audio directly. An extended
+  profile uses Parakeet transcription with a different conversation model.
+- **GLaDOS speech and animation:** spoken emotion directions move the browser
+  avatar; a separate Emotion Core maintains pleasure, arousal and dominance.
+- **A functional web console:** control microphone, voice and camera; inspect
+  minds, context slots, routing decisions, saved memory and background tasks.
+- **Vision:** E4B describes the current scene and recent changes using timestamped
+  images. Observation timing adapts to motion; the default range is 2–5 seconds.
+- **Memory and research:** retain conversation summaries and useful facts,
+  retrieve relevant memories, and perform requested internet research.
+- **Tools:** connect MCP services, including Home Assistant, and use native
+  controls for preferences, memory, tasks and allowlisted system commands.
+- **Proactive responses:** independent cores publish evidence for the Autonomy
+  Core to review. User interactions take priority over new background inference.
+
+## Quick start
+
+> *"The Enrichment Center is required to remind you that the Weighted Companion Cube cannot talk. In the event that it does talk The Enrichment Centre asks you to ignore its advice."* — GLaDOS
+
+You need Git and Python 3.12 or newer to run the installer. It creates a Python
+3.12.8 environment, installs GLaDOS and downloads the local ONNX speech models.
+The conversation model runs in a **separate server**.
+
+The reference setup uses a CUDA build of llama.cpp and Gemma 4 E4B. See the
+[model setup and measured results](docs/gemma4.md) for hardware and context
+capacity details; latency and memory use depend on your machine and enabled cores.
+
+### 1. Install GLaDOS
 
 ```bash
 git clone https://github.com/dnhkng/GLaDOS.git
@@ -393,144 +58,419 @@ cd GLaDOS
 python scripts/install.py
 ```
 
-## Usage
+The installer selects CUDA when its utility is available, an installed ROCm
+backend otherwise, or CPU. You can override this:
 
 ```bash
-uv run glados                           # Voice mode
-uv run glados tui                       # Text UI
-uv run glados start --input-mode text   # Text only
-uv run glados start --input-mode both   # Voice + text
-uv run glados say "The cake is a lie"   # Just TTS
+python scripts/install.py --backend cpu
+python scripts/install.py --backend cuda
+python scripts/install.py --backend amd --rocm-version 7.2.1
 ```
 
-### TUI Controls
+Choose the command for your machine; these are alternatives. GPU drivers and
+CUDA/ROCm must be installed separately. For AMD, follow the
+[AMD setup guide](docs/amd.md): the installer supports Linux x86_64 with ROCm
+7.1, 7.2 and 7.2.1, using matching MIGraphX wheels. AMD model performance still
+needs hardware validation. An installed OpenVINO provider is also retained by
+local audio provider selection; the installer does not supply an Intel runtime.
 
-Press `Ctrl+P` to open the command palette. Available commands:
+On Debian/Ubuntu, local microphone and speaker access may require:
 
-| Command | What it does |
-|---------|-------------|
-| Status | System overview |
-| Speech Recognition | Toggle ASR on/off |
-| Text-to-Speech | Toggle TTS on/off |
-| Config | View configuration |
-| Memory | Long-term memory stats |
-| Knowledge | Manage user facts |
+```bash
+sudo apt install libportaudio2
+```
 
-**Keyboard Shortcuts:**
-- `Ctrl+P` - Command palette
-- `F1` - Help screen
-- `Ctrl+D/L/S/A/U/M` - Toggle panels (Dialog, Logs, Status, Autonomy, Queue, MCP)
-- `Ctrl+I` - Toggle right info panels
-- `Ctrl+R` - Restore all panels
-- `Esc` - Close dialogs
+Windows users should install Python 3.12+ and, if a runtime DLL is missing, the
+[Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
+The AMD installer path is Linux-only. macOS support remains experimental.
+
+### 2. Start the conversation model
+
+Install a Gemma 4-capable CUDA `llama-server` separately. Download these two files
+from [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF)
+into `models/gemma4-benchmark/`:
+
+- `gemma-4-E4B-it-Q4_0.gguf`
+- `mmproj-gemma-4-E4B-it-Q8_0.gguf`
+
+These GGUF files are **not** downloaded by `glados download`.
+Checksums and the tested revision are in the [E4B setup guide](docs/gemma4.md#reproduce-with-llamacpp).
+Then, from the repository root, run:
+
+```bash
+bash scripts/run_llamacpp.sh
+```
+
+If the executable or models are elsewhere:
+
+```bash
+LLAMA_SERVER=/path/to/llama-server \
+GLADOS_MODEL_DIR=/path/to/gemma-models \
+bash scripts/run_llamacpp.sh
+```
+
+The launcher serves `gemma-4-E4B` at `http://127.0.0.1:18080`, with four inference
+slots and 16K context per slot. It is tuned for CUDA; AMD ONNX installation does
+not configure this separate server. Use an appropriate server build/configuration
+for other hardware, or choose the extended profile below.
+
+### 3. Open the web console
+
+In another terminal:
+
+```bash
+uv run --no-sync glados webapp --config configs/glados_webapp_config.yaml
+```
+
+Open **http://127.0.0.1:8050/**. This profile uses the **host machine’s microphone
+and speakers** by default. Browser microphone/speaker setup is described below.
+
+Use `--no-sync` after installer-based setup to preserve its selected ONNX runtime,
+particularly AMD’s separately installed vendor wheel. Rerun the installer to
+update or switch the backend; it preserves the environment and replaces the old
+ONNX distribution before installing the selected one.
+
+## Choose a conversation profile
+
+| Profile | Voice input | Conversation backend | Starting configuration |
+| --- | --- | --- | --- |
+| Default | Audio sent directly to Gemma 4 E4B | llama.cpp, thinking disabled | [glados_config.yaml](configs/glados_config.yaml) |
+| Web console | Same direct-audio profile, with browser controls | llama.cpp, thinking disabled | [glados_webapp_config.yaml](configs/glados_webapp_config.yaml) |
+| Extended | Parakeet TDT transcription, then text | Ollama or an OpenAI-compatible API | [glados_extended_config.yaml](configs/glados_extended_config.yaml) |
+
+English is the default input language. Direct-audio mode does **not** load
+Parakeet. Optional written user transcripts are off by default and use Gemma,
+not a second ASR model. Enable them in Facility Settings → Voice input when you
+want a written record. Extended mode uses Parakeet transcripts as model input.
+
+The extended profile ships with `gemma4:e4b` on an Ollama endpoint. Supply that
+model yourself or change `llm_model`, `completion_url` and the provider-specific
+request options. Use a non-thinking model, or its minimal/disabled reasoning
+setting, for responsive conversation.
+
+```bash
+uv run --no-sync glados webapp --config configs/glados_extended_config.yaml
+```
+
+For cloud/text backends, keep `native_audio.enabled: false`; do not send Gemma’s
+native audio request format to an API that does not support it. Vision has its
+own E4B endpoint and can remain independent of the conversation model.
+
+## Browser audio and camera
+
+The console can use local devices or browser media. To use browser audio, create
+`configs/browser_audio.yaml`:
+
+```yaml
+Glados:
+  audio_io: websocket
+  audio_io_options:
+    server: 127.0.0.1
+    port: 5051
+    rooms: false
+```
+
+Layer it over the web console profile:
+
+```bash
+uv run --no-sync glados webapp \
+  --config configs/glados_webapp_config.yaml \
+  --config configs/browser_audio.yaml
+```
+
+Open the console and use its microphone/speaker controls, granting browser
+permission when prompted. The HTTP console uses port 8050; browser audio uses
+the separate WebSocket server on port 5051. Camera observations can be controlled
+from the console, with camera selection in Facility Settings.
+
+Keep the default loopback binding for local use. Remote browser media needs a
+secure browser context and suitable HTTP/WebSocket proxy configuration. A wildcard
+HTTP bind also requires explicit `webapp.allowed_hosts`; this allowlist is not
+authentication. See the [web console guide](docs/webapp.md) for remote access,
+device permissions and configuration.
+
+## Using the console
+
+The top bar switches between the operator console and a Presence screen for
+tablets. Both use the same live engine state, controls and eye animation.
+Choose Dark, Clinical, Terminal or PotatOS in the top bar or Facility Settings;
+the theme is remembered by this browser.
+
+- **Central Core / Brainstem:** control input, spoken output, camera observations
+  and Quiet mode. Quiet pauses replies and background cores until a wake request
+  or the Wake control; disabling autonomy only disables proactive responses.
+- **Cores:** inspect and control the workers that produce observations and results,
+  including their shared inference capacity and waiting requests. Context slots
+  hold stored information; they are separate from inference capacity.
+- **Test Chamber:** browse saved facts and historical summaries.
+- **Neural Buffer:** inspect the actual request context and its sources.
+  The live system clock is included in reply context.
+- **Facility Settings:** edit response instructions, routing choices and thresholds,
+  preferred search sources, vision timing and optional transcripts.
+
+Settings edited in the console persist as YAML under `data/`, including
+`operator_settings.yaml`, `decision_lists.yaml`, `search_settings.yaml` and
+`vision_settings.yaml`. Console edits apply to the running app; manual file edits
+take effect after restart. Memories and summaries have their own persistent
+stores. See [memory and console controls](docs/webapp.md) for details.
+
+## Other launch modes
+
+Run commands from the repository root:
+
+```bash
+uv run --no-sync glados                         # Local voice mode
+uv run --no-sync glados tui                     # Terminal interface
+uv run --no-sync glados start --input-mode text # Typed input
+uv run --no-sync glados start --input-mode both # Voice and typed input
+uv run --no-sync glados say "The cake is a lie" # Speech synthesis only
+uv run --no-sync glados download               # Download/check local ONNX models
+```
+
+The TUI is an alternative to the web console. Use `Ctrl+P` for its command palette
+and `F1` for help. `glados --help` and each command’s `--help` list available
+configuration and input/output overrides.
+
+The model downloader currently verifies all registered local ONNX models,
+including optional ASR and Kokoro models. Downloading them does not mean they are
+all loaded: direct-audio mode skips Parakeet at runtime.
 
 ## Configuration
 
-> *"As part of a required test protocol, we will not monitor the next test chamber. You will be entirely on your own. Good luck."  -  GLaDOS*
+> *"As part of a required test protocol, we will not monitor the next test chamber. You will be entirely on your own. Good luck."* — GLaDOS
 
-### Change the LLM
+Configuration files contain a top-level `Glados:` mapping. Repeat `--config` to
+layer files; values in later files override earlier values. Start with a complete
+shipped profile and add small overlays for your changes.
 
-**Local (Ollama):**
+For example, `configs/personal.yaml`:
+
+```yaml
+Glados:
+  voice: glados # Or a supported Kokoro voice such as af_bella.
+  personality_preprompt:
+    - system: "You are GLaDOS. Give useful, accurate answers with dry humour."
+    - user: "What do you think of my code?"
+    - assistant: "It runs. We should preserve this moment for the historians."
+```
+
 ```bash
-ollama pull mistral
+uv run --no-sync glados webapp \
+  --config configs/glados_webapp_config.yaml \
+  --config configs/personal.yaml
 ```
-Then in `glados_config.yaml`:
+
+For a different text conversation backend, layer an override on the **extended**
+profile and set `llm_model`, `completion_url`, optional `api_key`/`llm_headers`,
+and the model’s supported `llm_request_options`. The included
+[MiniMax configuration](configs/minimax_config.yaml) is another provider example;
+check your provider’s current model names and request options before using it.
+
+## How the cores work
+
+> *"Let's be honest. Neither one of us knows what that thing does. Just put it in the corner and I'll deal with it later."* — GLaDOS
+
+```mermaid
+flowchart LR
+    mic[Microphone] --> vad[VAD and utterance buffer]
+    vad --> input[Direct audio or Parakeet transcript]
+    text[Typed input] --> route[Capability routing]
+    input --> route
+    route --> central[Central Core]
+    route --> tools[Native and MCP tools]
+    cores[Emotion, Memory, Vision, System, Search] --> slots[Context slots]
+    tools --> slots
+    slots --> central
+    slots --> autonomy[Autonomy Core review]
+    autonomy -->|Relevant update| central
+    central --> tts[GLaDOS or Kokoro TTS]
+    tts --> output[Speaker and animated avatar]
+```
+
+### Core components
+
+> *"All these science spheres are made out of asbestos, by the way. Keeps out the rats. Let us know if you feel a shortness of breath, a persistent dry cough, or your heart stopping. Because that's not part of the test. That's asbestos."* — Cave Johnson
+
+Independent cores publish regular updates, important updates and task results.
+The Autonomy Core considers their evidence together with the conversation before
+asking Central to speak. A completed search or recalled fact can be useful
+without needing another spoken response if the conversation already covers it.
+
+Background minds share a timer and worker pool, with fixed, adaptive, random
+adaptive or on-demand timing assigned separately from their work. They can use
+ordinary code or services without an LLM. See [mind scheduling](docs/autonomy.md#mind-execution-and-timing).
+
+Inference is admitted through a shared, bounded scheduler. The reference profile
+uses four server slots, with two reserved for interaction and routing. New
+background work waits during user interactions; already-running inference may
+finish, and stale outputs are rejected. Routing stays available. This reduces
+competition for the GPU without creating a separate model for each mind.
+
+With llama.cpp, capability routing scores a small fixed set of token options.
+It can choose a reply, an intentional silence or an available action. Text
+replies may be drafted in parallel when capacity is free; direct-audio drafts
+remain disabled. Model-server capabilities determine which optimizations apply.
+
+### Jev-style routing during speech input
+
+Jev-style routing uses the conversation model as a constrained classifier, rather
+than loading a separate routing model. Each decision stage assigns single-token
+letters such as `A`, `B` and `C` to the available choices. A compatible llama.cpp
+server returns their probabilities after softmax; GLaDOS normalizes the option
+scores and checks both confidence and the margin over the next choice. A tool
+route can require several stages: capability, service, then a saved action.
+
+```mermaid
+flowchart TD
+    mic["Microphone audio"] --> vad["VAD buffers speech<br/>416 ms silence completes a turn"]
+    vad --> mode{"Voice input mode"}
+    mode -->|Default| audio["E4B direct audio<br/>No transcript required"]
+    mode -->|Extended| asr["Parakeet transcript"]
+    audio --> router["Jev-style routing on the conversation model<br/>Stable instructions and option list first<br/>Recent context and current input last"]
+    asr --> router
+    asr -. "When a spare slot is available" .-> draft["Speculative Central Core draft<br/>Runs alongside routing"]
+    router --> scores["One generated option token per stage<br/>Option probabilities from llama.cpp"]
+    scores --> gate{"Confidence and margin sufficient?"}
+    gate -->|No| assist["Cancel draft; Central interprets the request<br/>No action authorized by classifier"]
+    gate -->|Yes| choice{"Selected route"}
+    choice -->|Ignore or quiet| silence["No spoken reply<br/>Cancel any speculative draft"]
+    choice -->|Reply| reply["Central Core answers<br/>Reuse a compatible draft, otherwise generate"]
+    choice -->|Capability or action| tool["Cancel draft; refine route if needed<br/>Execute validated saved tool arguments<br/>or ask Central to plan within tool scope"]
+    tool --> result["Tool result enters context"]
+    result --> reply
+    assist --> reply
+    draft -. "Used only for a compatible reply route" .-> reply
+    reply --> tts["Stream speech chunks to TTS<br/>Emotion markers drive the avatar"]
+    tts --> output["Speaker playback"]
+    resume["User resumes before reply delivery"] -.-> cancel["Invalidate pending reply<br/>Extend the captured utterance"]
+    cancel -.-> vad
+    cancel -. "Cancel stale routing, draft and response" .-> router
+```
+
+The one-token limit applies to each routing decision's output. Audio encoding and
+prompt processing still take time. Direct-audio turns currently route before
+Central generates a reply; only transcript-based turns can overlap a speculative
+draft. Background cores yield new inference work during the interaction, while
+the Routing Core keeps its reserved access to the shared scheduler.
+
+Speech capture uses 32 ms VAD chunks and a 416 ms silence gap. If the user resumes
+before the pending response begins delivery, the new speech can extend that turn
+and invalidate the pending response. Interruption also stops playback when
+`interruptible` is enabled. These timings do not imply a fixed end-to-end latency;
+[benchmarks and caching details](docs/gemma4.md) describe the measured setup.
+
+Emotion markers such as `[emotion:neutral]` direct the avatar while speech is
+chunked for synthesis. They do not set the Emotion Core’s PAD state. Vision uses
+E4B scene observations and timestamped recent frames; YuNet face tracking uses
+OpenCV separately. The old FastVLM backend is no longer part of the app.
+
+More detail: [autonomy](docs/autonomy.md), [vision](docs/vision.md),
+[web console and routing](docs/webapp.md), [inference investigation](docs/native-inference.md).
+
+## Tools and integrations
+
+Native tools include memory management, user preferences, task cancellation,
+slot management, reports, camera look requests and a fixed set of safe system
+commands. They are not a general-purpose shell interface.
+
+MCP adds external capabilities through stdio, HTTP or SSE. For example, an
+overlay can register the bundled system-information server:
+
 ```yaml
-model: "mistral"
-```
-Browse models: [ollama.com/library](https://ollama.com/library)
-
-**Cloud (MiniMax, OpenRouter, etc.):**
-```bash
-uv run glados start --config configs/minimax_config.yaml
-```
-Or edit `glados_config.yaml` with your provider's `completion_url`, `llm_model`, and `api_key`. See [LLM Backend](#llm-backend) for details.
-
-### Change the Voice
-> *“I'm speaking in an accent that is beyond her range of hearing.”  -  Wheatley*
-
-
-Kokoro voices in `glados_config.yaml`:
-```yaml
-voice: "af_bella"
+Glados:
+  mcp_servers:
+    - name: system_info
+      transport: stdio
+      command: python
+      args: ["-m", "glados.mcp.system_info_server"]
 ```
 
-**Female US:** af_alloy, af_aoede, af_jessica, af_kore, af_nicole, af_nova, af_river, af_sarah, af_sky
-**Female UK:** bf_alice, bf_emma, bf_isabella, bf_lily
-**Male US:** am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael, am_onyx, am_puck
-**Male UK:** bm_daniel, bm_fable, bm_george, bm_lewis
+An `mcp_servers` override replaces that list, so include any other servers you
+want to retain. The shipped profiles include requested internet search through
+Exa; this contacts an external service when research is used. Home Assistant
+requires your own server and credentials. See [MCP configuration](docs/mcp.md)
+for tool filtering, memory services and transport setup.
 
-### Custom Personality
+## GLaDOS speech API
 
-Copy `configs/glados_config.yaml`, edit the personality:
+> *"I'm speaking in an accent that is beyond her range of hearing."* — Wheatley
 
-```yaml
-personality_preprompt:
-  - system: "You are a sarcastic AI who judges humans."
-  - user: "What do you think of my code?"
-  - assistant: "I've seen better output from a random number generator."
-```
-
-Run with:
-```bash
-uv run glados start --config configs/your_config.yaml
-```
-
-### MCP Servers
-
-Add tools in `glados_config.yaml`:
-
-```yaml
-mcp_servers:
-  - name: "system_info"
-    transport: "stdio"
-    command: "python"
-    args: ["-m", "glados.mcp.system_info_server"]
-```
-
-Built-in: `system_info`, `time_info`, `disk_info`, `network_info`, `process_info`, `power_info`, `memory`
-
-See [mcp.md](/docs/mcp.md) for Home Assistant integration.
-
-## TTS API Server
-
-Expose Kokoro as an OpenAI-compatible TTS endpoint:
+The optional API exposes the **GLaDOS voice** through an OpenAI-style
+`POST /v1/audio/speech` endpoint. Other API voices and speed adjustment are not
+implemented. This endpoint does not require the conversation model server.
 
 ```bash
 python scripts/install.py --api
-./scripts/serve
+uv run --no-sync litestar --app glados.api.app:create_app run \
+  --host 127.0.0.1 --port 5050
 ```
 
-Or Docker:
+For AMD, retain the same `--backend amd --rocm-version ...` options when running
+the installer with `--api`.
+
+```bash
+curl -X POST http://127.0.0.1:5050/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"input":"Hello, test subject.","voice":"glados","response_format":"mp3"}' \
+  --output speech.mp3
+```
+
+The API supports MP3, WAV and OGG output. It reuses the synthesizer by default;
+set `Api.reuse_tts: false` in [api_config.yaml](configs/api_config.yaml) or use
+`GLADOS_API_REUSE_TTS=false` to load it per request.
+
+A Docker API setup is also supplied:
+
 ```bash
 docker compose up -d --build
 ```
 
-Generate speech:
-```bash
-curl -X POST http://localhost:5050/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -d '{"input": "Hello.", "voice": "glados"}' \
-  --output speech.mp3
-```
+This serves port 5050. It is the speech API, not the browser console or an
+installer for the E4B model server.
 
 ## Troubleshooting
 
-> *"No one will blame you for giving up. In fact, quitting at this point is a perfectly reasonable response."  -  GLaDOS*
+> *"No one will blame you for giving up. In fact, quitting at this point is a perfectly reasonable response."* — GLaDOS
 
-**She keeps responding to herself:**
-Use headphones or a mic with echo cancellation. Or set `interruptible: false`.
+| Symptom | Check |
+| --- | --- |
+| No reply / cannot reach model | Start the separate model server; check its URL, model alias and profile. Default E4B expects port 18080. |
+| Missing model files | Run `uv run --no-sync glados download`; obtain the E4B GGUF and projector separately. |
+| AMD provider missing or CPU fallback | Check the matching ROCm release, driver and wheel; use the AMD guide and startup session-provider logs. |
+| Runtime changed after launching | Use `uv run --no-sync` after installer setup; do not mix CPU, CUDA and AMD ONNX distributions. |
+| Browser microphone unavailable | Select the WebSocket audio backend, start port 5051, grant permission and use localhost or a secure origin. |
+| Rejected remote console host | Configure explicit `webapp.allowed_hosts` alongside the bind address; see the web console guide. |
+| GLaDOS hears her own voice | Use headphones or echo cancellation; disable `interruptible` if playback is retriggering input. |
+| She stays quiet | Check microphone/voice controls, Quiet state and whether the router chose not to respond. |
 
-**Windows DLL error:**
-Install [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
+## Development and next steps
 
-## Development
+> *"Federal regulations require me to warn you that this next test chamber... is looking pretty good."* — GLaDOS
 
-Explore the models:
+For a separate CPU development environment:
+
 ```bash
-jupyter notebook demo.ipynb
+uv sync --extra cpu --extra dev
+uv run --no-sync pytest -q tests
 ```
 
-## Star History
+The API tests require the `api` extra and downloaded speech models. Do not use
+this CPU sync command to update an AMD environment; it replaces the selected
+runtime. Installer-based environments can add development tools with
+`uv pip install -e ".[dev]"` instead.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=dnhkng/GlaDOS&type=Date)](https://star-history.com/#dnhkng/GlaDOS&Date)
+Recorded tests and experiments are in [docs/benchmarks](docs/benchmarks), with
+runnable probes in [examples](examples). The
+[refactor roadmap](plans/architecture-refactor-progress.md) records remaining
+runtime work; [roadmap.md](docs/roadmap.md) covers broader directions. AMD model
+validation, streaming ASR and physical animatronics remain future work.
+
+## Community
+
+Questions, experiments and feedback are welcome on
+[Discord](https://discord.com/invite/ERTDKwpjNB). You can also
+[sponsor development](https://ko-fi.com/dnhkng).
+
+GLaDOS and Portal belong to Valve. This is a fan project.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=dnhkng/GLaDOS&type=Date)](https://www.star-history.com/#dnhkng/GLaDOS&Date)
