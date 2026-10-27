@@ -1,0 +1,22 @@
+# Layered over glados_extended_config.yaml by docker-compose.assistant.yml (--config files are deep-merged).
+# Only what Docker changes: where the LLM is, browser audio instead of host audio, and listening on the
+# container's interfaces (compose publishes them on 127.0.0.1 only).
+Glados:
+  completion_url: "http://ollama:11434/api/chat"
+  llm_model: "gemma4:e4b"   # the model pulled by `pull-model` (OLLAMA_MODEL)
+
+  # No sound devices in the container: microphone and speaker come from a browser tab over WebSocket
+  audio_io: "websocket"
+  audio_io_options:
+    server: "0.0.0.0"
+    port: 5051
+    rooms: false
+
+  webapp:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8050
+    allowed_hosts: [localhost, 127.0.0.1]
+
+  # mcp_servers is a list, so setting it here replaces the extended profile's list (Exa web search,
+  # system_info) instead of adding to it: copy the entries you want to keep, then add e.g. Home Assistant.

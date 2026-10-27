@@ -5,3 +5,10 @@ __pycache__
 *.pyc
 dist/
 tmp/
+.git
+.github
+.env
+docs/
+tests/
+examples/
+*.onnx

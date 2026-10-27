@@ -1,0 +1,83 @@
+# The full GLaDOS assistant in Docker (extended profile): Parakeet ASR + GLaDOS TTS on the CPU in `glados`,
+# the LLM on an AMD GPU in `ollama` (ROCm). docker-compose.yml stays the TTS API on its own.
+#
+# The `glados` service uses the image .github/workflows/docker-build.yml publishes (the same one as the TTS API);
+# if it can't be pulled, Compose builds it from this repo (`--build` always builds locally).
+#
+#   docker compose -f docker-compose.assistant.yml --profile setup run --rm pull-model
+#   docker compose -f docker-compose.assistant.yml up -d
+#
+# Console: http://localhost:8050. Microphone and speaker: docs/docker-assistant.md.
+# NVIDIA: use the image ollama/ollama:0.40.11 and replace `devices` with a `deploy.resources.reservations` GPU entry.
+name: glados-assistant
+
+x-hardening: &hardening
+  init: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  logging:
+    driver: json-file
+    options:
+      max-size: '5m'
+      max-file: '3'
+
+services:
+  ollama:
+    <<: *hardening
+    image: ollama/ollama:0.40.11-rocm
+    restart: unless-stopped
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      OLLAMA_CONTEXT_LENGTH: '${OLLAMA_CONTEXT_LENGTH:-16384}'
+      OLLAMA_KEEP_ALIVE: '30m'
+    volumes:
+      - ollama:/root/.ollama
+    # No published port: Ollama's API has no authentication. Only containers on `backend` reach it.
+    networks: [backend, egress]   # egress: model downloads
+    healthcheck:
+      test: ['CMD', 'ollama', 'ps']
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  pull-model:
+    <<: *hardening
+    image: ollama/ollama:0.40.11-rocm
+    profiles: [setup]
+    entrypoint: ['ollama']
+    command: ['pull', '${OLLAMA_MODEL:-gemma4:e4b}']   # match llm_model in configs/docker_assistant.yaml
+    environment:
+      OLLAMA_HOST: 'http://ollama:11434'
+    networks: [backend]
+
+  glados:
+    <<: *hardening
+    image: ${GLADOS_IMAGE:-ghcr.io/herohade/glados:latest}
+    build: .
+    restart: unless-stopped
+    command: ['uv', 'run', '--no-sync', 'glados', 'webapp',
+              '--config', 'configs/glados_extended_config.yaml', '--config', 'configs/docker_assistant.yaml']
+    volumes:
+      - ./configs/docker_assistant.yaml:/app/configs/docker_assistant.yaml:ro   # edit without rebuilding
+      - memory:/home/glados/.glados
+    ports:
+      # Neither has authentication: loopback only
+      - '127.0.0.1:8050:8050'   # web console
+      - '127.0.0.1:5051:5051'   # browser microphone / speaker (WebSocket)
+    networks: [backend, egress]  # egress: the internet_search MCP server (Exa); remove for an offline assistant
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+networks:
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  ollama:
+    name: ollama-models   # a fixed name, so other stacks on this machine can reuse the downloaded models
+  memory:
